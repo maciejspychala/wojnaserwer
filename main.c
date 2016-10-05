@@ -15,8 +15,9 @@ int semid;
 int howManyClients = 0;
 int shareKey = 1324231;
 struct Data *data;
-int zyje = 1;
-void podnies(int semnum) {
+int serverAlive = 1;
+
+void pickUpSem(unsigned short semnum) {
     buf.sem_num = semnum;
     buf.sem_op = 1;
     buf.sem_flg = 0;
@@ -27,7 +28,7 @@ void podnies(int semnum) {
 
 }
 
-void opusc(int semnum) {
+void lowerSem(unsigned short semnum) {
     buf.sem_num = semnum;
     buf.sem_op = -1;
     buf.sem_flg = 0;
@@ -40,13 +41,13 @@ void opusc(int semnum) {
 
 void sendData() {
     int i = 0;
-    opusc(1);
+    lowerSem(1);
     for (; i < 2; i++) {
         if (msgsnd(clientsId[i], &data[i], sizeof(data[i]) - sizeof(long), 0) < 0) {
             perror("wysylanie danych");
         }
     }
-    podnies(1);
+    pickUpSem(1);
 }
 
 void sendInfo(int i, char *info) {
@@ -55,138 +56,138 @@ void sendInfo(int i, char *info) {
     strcpy(data[i].info, "");
 }
 
-void buduj(struct Build build, int i) {
+void startBuilding(struct Build build, int i) {
     while (build.light > 0) {
         sleep(2);
         build.light--;
-        opusc(0);
+        lowerSem(0);
         ++data[i].light;
-        podnies(0);
+        pickUpSem(0);
         sendData();
     }
     while (build.heavy > 0) {
         sleep(3);
         build.heavy--;
-        opusc(0);
+        lowerSem(0);
         ++data[i].heavy;
-        podnies(0);
+        pickUpSem(0);
         sendData();
     }
     while (build.cavalry > 0) {
         sleep(5);
         build.cavalry--;
-        opusc(0);
+        lowerSem(0);
         ++data[i].cavalry;
-        podnies(0);
+        pickUpSem(0);
         sendData();
     }
     while (build.workers > 0) {
         sleep(2);
         build.workers--;
-        opusc(0);
+        lowerSem(0);
         ++data[i].workers;
-        podnies(0);
+        pickUpSem(0);
         sendData();
     }
 }
 
-double liczAtak(double light, double heavy, double cavalry) {
+double countAttackPower(double light, double heavy, double cavalry) {
     return (light + heavy * 1.5 + cavalry * 3.5);
 }
 
-double liczObrone(double light, double heavy, double cavalry) {
+double countDefPower(double light, double heavy, double cavalry) {
     return (light * 1.2 + heavy * 3 + cavalry * 1.2);
 }
 
-void atakuj(struct Attack attack, int i) {
-    int atakujacy = i;
-    int broniacy = (i + 1) % 2;
+void startAttack(struct Attack attack, int i) {
+    int attacker = i;
+    int defender = (i + 1) % 2;
     sleep(5);
-    double atak[2];
-    double obrona[2];
-    int atakUdany = 0;
-    opusc(0);
-    atak[atakujacy] = liczAtak(attack.light, attack.heavy, attack.cavalry);
-    atak[broniacy] = liczAtak(data[broniacy].light, data[broniacy].heavy, data[broniacy].cavalry);
-    obrona[atakujacy] = liczObrone(attack.light, attack.heavy, attack.cavalry);
-    obrona[broniacy] = liczObrone(data[broniacy].light, data[broniacy].heavy, data[broniacy].cavalry);
-    struct Attack straty[2];
-    printf("atakujacy %d\nbroniacy%d\n", atakujacy, broniacy);
+    double atkPower[2];
+    double defPower[2];
+    int attackSuccessful = 0;
+    lowerSem(0);
+    atkPower[attacker] = countAttackPower(attack.light, attack.heavy, attack.cavalry);
+    atkPower[defender] = countAttackPower(data[defender].light, data[defender].heavy, data[defender].cavalry);
+    defPower[attacker] = countDefPower(attack.light, attack.heavy, attack.cavalry);
+    defPower[defender] = countDefPower(data[defender].light, data[defender].heavy, data[defender].cavalry);
+    struct Attack loss[2];
+    printf("atakujacy %d\nbroniacy%d\n", attacker, defender);
     printf("sila atakujacego %f obrona %f\nsila broniacego %f obrona %f\n",
-           atak[atakujacy], obrona[atakujacy], atak[broniacy], obrona[broniacy]);
-    if (atak[atakujacy] > obrona[broniacy]) {
+           atkPower[attacker], defPower[attacker], atkPower[defender], defPower[defender]);
+    if (atkPower[attacker] > defPower[defender]) {
         printf("atak udany\n");
-        atakUdany = 1;
-        ++data[atakujacy].points;
-        straty[broniacy].light = data[broniacy].light;
-        straty[broniacy].heavy = data[broniacy].heavy;
-        straty[broniacy].cavalry = data[broniacy].cavalry;
-        data[broniacy].light = 0;
-        data[broniacy].heavy = 0;
-        data[broniacy].cavalry = 0;
+        attackSuccessful = 1;
+        ++data[attacker].points;
+        loss[defender].light = data[defender].light;
+        loss[defender].heavy = data[defender].heavy;
+        loss[defender].cavalry = data[defender].cavalry;
+        data[defender].light = 0;
+        data[defender].heavy = 0;
+        data[defender].cavalry = 0;
     } else {
         printf("atak nieudany\n");
-        straty[broniacy].light = (int) (data[broniacy].light * (atak[atakujacy] / obrona[broniacy]));
-        straty[broniacy].heavy = (int) (data[broniacy].heavy * (atak[atakujacy] / obrona[broniacy]));
-        straty[broniacy].cavalry = (int) (data[broniacy].cavalry * (atak[atakujacy] / obrona[broniacy]));
-        data[broniacy].light -= straty[broniacy].light;
-        data[broniacy].heavy -= straty[broniacy].heavy;
-        data[broniacy].cavalry -= straty[broniacy].cavalry;
+        loss[defender].light = (int) (data[defender].light * (atkPower[attacker] / defPower[defender]));
+        loss[defender].heavy = (int) (data[defender].heavy * (atkPower[attacker] / defPower[defender]));
+        loss[defender].cavalry = (int) (data[defender].cavalry * (atkPower[attacker] / defPower[defender]));
+        data[defender].light -= loss[defender].light;
+        data[defender].heavy -= loss[defender].heavy;
+        data[defender].cavalry -= loss[defender].cavalry;
     }
 
-    if (atak[broniacy] > obrona[atakujacy]) {
+    if (atkPower[defender] > defPower[attacker]) {
         printf("obrona udana\n");
-        straty[atakujacy].light = attack.light;
-        straty[atakujacy].heavy = attack.heavy;
-        straty[atakujacy].cavalry = attack.cavalry;
+        loss[attacker].light = attack.light;
+        loss[attacker].heavy = attack.heavy;
+        loss[attacker].cavalry = attack.cavalry;
     } else {
         printf("obrona nieudana\n");
-        straty[atakujacy].light = (int) (attack.light * (atak[broniacy] / obrona[atakujacy]));
-        straty[atakujacy].heavy = (int) (attack.heavy * (atak[broniacy] / obrona[atakujacy]));
-        straty[atakujacy].cavalry = (int) (attack.cavalry * (atak[broniacy] / obrona[atakujacy]));
-        data[atakujacy].light += (attack.light - straty[atakujacy].light);
-        data[atakujacy].heavy += (attack.heavy - straty[atakujacy].heavy);
-        data[atakujacy].cavalry += (attack.cavalry - straty[atakujacy].cavalry);
+        loss[attacker].light = (int) (attack.light * (atkPower[defender] / defPower[attacker]));
+        loss[attacker].heavy = (int) (attack.heavy * (atkPower[defender] / defPower[attacker]));
+        loss[attacker].cavalry = (int) (attack.cavalry * (atkPower[defender] / defPower[attacker]));
+        data[attacker].light += (attack.light - loss[attacker].light);
+        data[attacker].heavy += (attack.heavy - loss[attacker].heavy);
+        data[attacker].cavalry += (attack.cavalry - loss[attacker].cavalry);
     }
 
-    char infoAtak[120];
+    char infoAtk[120];
     char infoDef[120];
 
-    if (atakUdany) {
-        sprintf(infoAtak, "Atak udany. Stracono %d lekkiej, %d ciezkiej i %d jazdy.",
-                straty[atakujacy].light, straty[atakujacy].heavy, straty[atakujacy].cavalry);
+    if (attackSuccessful) {
+        sprintf(infoAtk, "Atak udany. Stracono %d lekkiej, %d ciezkiej i %d jazdy.",
+                loss[attacker].light, loss[attacker].heavy, loss[attacker].cavalry);
         sprintf(infoDef, "Pokonano Cie. Stracono %d lekkiej, %d ciezkiej i %d jazdy.",
-                straty[broniacy].light, straty[broniacy].heavy, straty[broniacy].cavalry);
+                loss[defender].light, loss[defender].heavy, loss[defender].cavalry);
     } else {
-        sprintf(infoAtak, "Atak się nie powiódł. Stracono %d lekkiej, %d ciezkiej i %d jazdy.",
-                straty[atakujacy].light, straty[atakujacy].heavy, straty[atakujacy].cavalry);
+        sprintf(infoAtk, "Atak się nie powiódł. Stracono %d lekkiej, %d ciezkiej i %d jazdy.",
+                loss[attacker].light, loss[attacker].heavy, loss[attacker].cavalry);
         sprintf(infoDef, "Obrona udana. Stracono %d lekkiej, %d ciezkiej i %d jazdy.",
-                straty[broniacy].light, straty[broniacy].heavy, straty[broniacy].cavalry);
+                loss[defender].light, loss[defender].heavy, loss[defender].cavalry);
     }
-    sendInfo(atakujacy, infoAtak);
-    sendInfo(broniacy, infoDef);
-    if (data[atakujacy].points >= 5) {
-        data[atakujacy].end = 1;
-        sendInfo(atakujacy, "Gratulacje, wygrales!");
-        data[broniacy].end = 1;
-        sendInfo(broniacy, "Niestety, przegrales.");
+    sendInfo(attacker, infoAtk);
+    sendInfo(defender, infoDef);
+    if (data[attacker].points >= 5) {
+        data[attacker].end = 1;
+        sendInfo(attacker, "Gratulacje, wygrales!");
+        data[defender].end = 1;
+        sendInfo(defender, "Niestety, przegrales.");
 
     }
-    podnies(0);
+    pickUpSem(0);
 
 }
 
-void czyAtakuja() {
+void ifSomeoneAttack() {
     struct Attack attack[2];
     int i = 0;
     if (fork() == 0)
         i = 1;
-    while (zyje) {
-        int moznaAtakowac = 0;
+    while (serverAlive) {
+        int canAttack = 0;
         msgrcv(clientsId[i], &attack[i], sizeof(attack[i]) - sizeof(long), 3, 0);
         printf("klient %d chce atakowac %d %d %d \n",
                i + 1, attack[i].light, attack[i].heavy, attack[i].cavalry);
-        opusc(0);
+        lowerSem(0);
         if (attack[i].light <= data[i].light &&
             attack[i].heavy <= data[i].heavy &&
             attack[i].cavalry <= data[i].cavalry) {
@@ -197,78 +198,78 @@ void czyAtakuja() {
             data[i].heavy -= attack[i].heavy;
             data[i].cavalry -= attack[i].cavalry;
             sendInfo(i, info);
-            moznaAtakowac = 1;
+            canAttack = 1;
         } else {
             sendInfo(i, "Nie masz wystarczajaco jednostek");
         }
-        podnies(0);
-        if (moznaAtakowac && fork() == 0) {
-            atakuj(attack[i], i);
+        pickUpSem(0);
+        if (canAttack && fork() == 0) {
+            startAttack(attack[i], i);
             exit(0);
         }
     }
 }
 
-void czyChcaBudowac() {
+void ifWantBuild() {
     struct Build build[2];
     int i = 0;
     if (fork() == 0)
         i = 1;
-    while (zyje) {
+    while (serverAlive) {
         msgrcv(clientsId[i], &build[i], sizeof(build[i]) - sizeof(long), 2, 0);
         printf("klient %d chce budowac %d %d %d %d \n",
                i + 1, build[i].light, build[i].heavy, build[i].cavalry, build[i].workers);
 
-        int cena = build[i].light * 100 + build[i].heavy * 250 +
+        int cost = build[i].light * 100 + build[i].heavy * 250 +
                    build[i].cavalry * 550 + build[i].workers * 150;
-        int moznaBudowac = 0;
-        opusc(0);
-        if (cena <= data[i].resources) {
+        int canBuild = 0;
+        lowerSem(0);
+        if (cost <= data[i].resources) {
             char info[120];
             sprintf(info, "budujemy: lekka %d, ciezka %d, jazda %d, robotnicy %d za %d talarow",
-                    build[i].light, build[i].heavy, build[i].cavalry, build[i].workers, cena);
-            data[i].resources -= cena;
+                    build[i].light, build[i].heavy, build[i].cavalry, build[i].workers, cost);
+            data[i].resources -= cost;
             sendInfo(i, info);
-            moznaBudowac = 1;
+            canBuild = 1;
         } else {
             sendInfo(i, "Nie masz wystarczajaco srodkow");
         }
-        podnies(0);
-        if (moznaBudowac && fork() == 0) {
-            opusc(2 + i);
-            buduj(build[i], i);
-            podnies(2 + i);
+        pickUpSem(0);
+        if (canBuild && fork() == 0) {
+            lowerSem(2 + i);
+            startBuilding(build[i], i);
+            pickUpSem(2 + i);
         }
 
     }
 }
 
 
-void setConnections(int kolejkaId) {
+void setConnections(int msgID) {
     struct Init init;
 
-    while (msgrcv(kolejkaId, &init, sizeof(init.nextMsg), 2, IPC_NOWAIT) > -1);
-    while (msgrcv(kolejkaId, &init, sizeof(init.nextMsg), 1, IPC_NOWAIT) > -1);
+    while (msgrcv(msgID, &init, sizeof(init.nextMsg), 2, IPC_NOWAIT) > -1);
+    while (msgrcv(msgID, &init, sizeof(init.nextMsg), 1, IPC_NOWAIT) > -1);
     init.mtype = 1;
     while (howManyClients != 2) {
         while ((clientsId[howManyClients] = msgget(shareKey++, IPC_CREAT | IPC_EXCL | 0640)) < 0);
         init.nextMsg = --shareKey;
         shareKey++;
         printf("stawiam kolejke id = %d\n", init.nextMsg);
-        msgsnd(kolejkaId, &init, sizeof(init.nextMsg), 0);
+        msgsnd(msgID, &init, sizeof(init.nextMsg), 0);
         ++howManyClients;
     }
 
-    msgrcv(kolejkaId, &init, sizeof(init.nextMsg), 2, 0);
+    msgrcv(msgID, &init, sizeof(init.nextMsg), 2, 0);
     printf("polaczyl sie %d klient\n", 1);
-    msgrcv(kolejkaId, &init, sizeof(init.nextMsg), 2, 0);
+    msgrcv(msgID, &init, sizeof(init.nextMsg), 2, 0);
     printf("polaczyl sie %d klient\n", 2);
 }
 
 void setDataForStart() {
     int i = 0;
     for (; i < 2; i++) {
-        data[i].mtype = 0;
+        data[i].mtype = 1;
         data[i].light = 0;
         data[i].heavy = 0;
         data[i].cavalry = 0;
@@ -280,12 +281,12 @@ void setDataForStart() {
     }
 }
 
-void jednostkiCoSekunde() {
-    while (zyje) {
-        opusc(0);
+void unitsPerSec() {
+    while (serverAlive) {
+        lowerSem(0);
         data[0].resources += 50 + 5 * data[0].workers;
         data[1].resources += 50 + 5 * data[1].workers;
-        podnies(0);
+        pickUpSem(0);
         sendData();
         sleep(1);
     }
@@ -320,21 +321,20 @@ void setSem() {
     }
 }
 
-void czyZyja() {
+void ifClientsAlive() {
     int i = 0;
     int howMany = 0;
-    int recive;
+    int receive;
     if (fork() == 0) {
         i = 1;
     }
     struct Alive alive;
-    while (zyje) {
-        recive = msgrcv(clientsId[i], &alive, sizeof(alive) - sizeof(long), 4, IPC_NOWAIT);
-        if (recive < 0) {
+    while (serverAlive) {
+        receive = msgrcv(clientsId[i], &alive, sizeof(alive) - sizeof(long), 4, IPC_NOWAIT);
+        if (receive < 0) {
             ++howMany;
             printf("ktos nie zyje %d\n", i + 1);
-        }
-        else {
+        } else {
             howMany = 0;
         }
         if (howMany > 2) {
@@ -343,7 +343,7 @@ void czyZyja() {
             data[(i + 1) % 2].points = 5;
             data[(i + 1) % 2].end = 1;
             sendInfo((i + 1) % 2, "Drugi Klient rozlaczyl sie");
-            zyje = 0;
+            serverAlive = 0;
             exit(0);
         }
         sleep(2);
@@ -351,10 +351,10 @@ void czyZyja() {
 
 }
 
-void jaZyje() {
+void pingClients() {
     struct Alive alive;
     alive.mtype = 5;
-    while (zyje) {
+    while (serverAlive) {
         msgsnd(clientsId[0], &alive, sizeof(alive) - sizeof(long), 0);
         msgsnd(clientsId[1], &alive, sizeof(alive) - sizeof(long), 0);
         sleep(2);
@@ -364,30 +364,30 @@ void jaZyje() {
 
 int main() {
     int key = 15071410;
-    int kolejkaInitId = msgget(key, IPC_CREAT | 0640);
+    int initMsgID = msgget(key, IPC_CREAT | 0640);
     setSem();
 
     int p = shmget(clientsId[0], 2 * sizeof(struct Data), IPC_CREAT | 0640);
     data = (struct Data *) shmat(p, NULL, 0);
 
-    if (kolejkaInitId == -1) {
+    if (initMsgID == -1) {
         perror("Utworzenie kolejki komunikatow");
         exit(1);
     }
 
-    setConnections(kolejkaInitId);
+    setConnections(initMsgID);
     setDataForStart();
 
     if (fork() == 0) {
-        jednostkiCoSekunde();
+        unitsPerSec();
     } else if (fork() == 0) {
-        czyChcaBudowac();
+        ifWantBuild();
     } else if (fork() == 0) {
-        czyAtakuja();
+        ifSomeoneAttack();
     } else if (fork() == 0) {
-        czyZyja();
+        ifClientsAlive();
     } else {
-        jaZyje();
+        pingClients();
     }
     kill(0, SIGKILL);
     exit(0);
